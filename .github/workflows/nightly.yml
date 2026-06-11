@@ -1,0 +1,85 @@
+name: Nightly checks
+
+# Vérifications périodiques de non-régression et de sécurité, volontairement HORS
+# du pipeline CI (pas nécessaires à chaque PR). Le nightly détecte ce que le *temps*
+# introduit : nouvelles CVE des dépendances et des images de base.
+on:
+  schedule:
+    - cron: '0 3 * * *' # tous les jours à 03:00 UTC
+  workflow_dispatch: {} # déclenchement manuel possible
+
+jobs:
+  tests:
+    name: Full test suite (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [server, client]
+    defaults:
+      run:
+        working-directory: ./${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        if: matrix.project == 'server'
+        run: npx prisma generate
+      - name: Test with coverage
+        run: npm run test:coverage
+
+  audit:
+    name: Dependency audit (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [server, client]
+    defaults:
+      run:
+        working-directory: ./${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # Gate: échoue si les dépendances de PRODUCTION (ce qui est livré) ont une
+      # vulnérabilité high/critical.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      # Informatif : remonte les vulnérabilités dev (CI/outils) sans faire échouer
+      # le run (elles ne sont pas livrées).
+      - name: Audit all dependencies (informational)
+        run: npm audit
+        continue-on-error: true
+
+  image-scan:
+    name: Trivy image scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [server, client]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build -t orion-${{ matrix.service }}:nightly ./${{ matrix.service }}
+      # Échoue sur les vulnérabilités HIGH/CRITICAL *corrigeables* (ignore-unfixed)
+      # → signal actionnable : mettre à jour l'image de base ou un paquet.
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: orion-${{ matrix.service }}:nightly
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
