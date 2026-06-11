@@ -102,8 +102,9 @@ deployment plan in [`DOCUMENTATION.md`](./DOCUMENTATION.md)).
 ## Technical choices (highlights)
 
 - **Quality & security as code** — every change is linted, type-checked, tested
-  (with coverage) and analyzed by SonarCloud before merge; a nightly job audits
-  dependencies (`npm audit`) and scans images (Trivy).
+  (with coverage) and must pass the SonarCloud Quality Gate before merge (enforced
+  by branch protection); a nightly job audits dependencies (`npm audit`) and scans
+  images (Trivy).
 - **Reproducible builds** — `npm ci` against committed lockfiles, versioned Prisma
   migrations, and GitHub Actions pinned to explicit versions.
 - **Minimal, hardened images** — official Alpine bases, multi-stage builds,

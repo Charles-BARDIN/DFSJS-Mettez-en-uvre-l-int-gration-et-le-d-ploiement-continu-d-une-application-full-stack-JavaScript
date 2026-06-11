@@ -488,8 +488,14 @@ une couverture maximale. La couverture se concentre donc sur la **logique métie
 services) et la **validation des entrées** (les schémas Zod) — là où se prennent les
 véritables décisions de l'application —, tandis que la « tuyauterie » fine (contrôleurs,
 routes) est laissée de côté, conformément au principe de ne pas introduire de complexité
-inutile. Dans le même esprit, les **tests end-to-end UI** (navigateur) sont hors
-périmètre et identifiés comme amélioration future (cf. [§9](#9-conclusion)).
+inutile. En cohérence, le **code d'infrastructure sans logique métier** (amorçage
+Express `index.ts`, configuration du *logger*, *middleware* de journalisation) est
+explicitement **exclu de la métrique de couverture** dans `sonar-project.properties` : le
+tester reviendrait à vérifier qu'Express ou Winston fonctionnent. Ce code reste
+**analysé** par SonarCloud (bugs, *code smells*, vulnérabilités) ; il est par ailleurs
+exercé de bout en bout par le *smoke test* de la CD. Dans le même esprit, les **tests
+end-to-end UI** (navigateur) sont hors périmètre et identifiés comme amélioration future
+(cf. [§9](#9-conclusion)).
 
 ### 4.2 Fréquence d'exécution
 
@@ -512,7 +518,9 @@ nuit, ce qui détecte toute régression, y compris une dérive d'environnement. 
 `main` toujours déployable**, la CI jouant le rôle de garde-fou avant tout merge.
 
 En matière de **critères d'alerte**, un test en échec **bloque la pull request** ; le
-*Quality Gate* SonarCloud signale tout dépassement des seuils de qualité ou de sécurité ;
+*Quality Gate* SonarCloud **bloque également le merge** lorsqu'il n'est pas respecté —
+le scanner attend son verdict (`sonar.qualitygate.wait=true`) et une *branch protection*
+sur `main` exige le passage du contrôle SonarCloud (cf. [§5.1](#51-résultats-sonarqube)) ;
 le *gate* `npm audit` (sur les dépendances de production) bloque le *nightly* ; le scan
 Trivy, lui, est en *report-only* (cf. [§5.2](#52-analyse-des-risques)).
 
@@ -534,6 +542,13 @@ L'analyse surveille les **vulnérabilités** et *security hotspots* (sécurité)
 **code smells** et la **complexité** (maintenabilité), la **duplication** de code et la
 **couverture** des tests. Le *Quality Gate* synthétise ces critères en un verdict
 *passed / failed*, évalué en priorité sur le nouveau code de chaque pull request.
+
+Ce verdict est **bloquant** : le scanner attend l'évaluation du *Quality Gate*
+(`sonar.qualitygate.wait=true`), ce qui fait échouer le job CI si le gate n'est pas
+respecté, et une *branch protection* sur `main` rend le contrôle « SonarCloud Code
+Analysis » **obligatoire** avant tout merge. Une pull request qui dégraderait la qualité
+ou la sécurité (par exemple une couverture insuffisante sur le nouveau code) ne peut donc
+pas être fusionnée.
 
 > Les **résultats mesurés** (vulnérabilités, *code smells* critiques, zones de
 > complexité, taux de couverture) et leur analyse détaillée sont présentés dans la
