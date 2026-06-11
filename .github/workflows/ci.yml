@@ -88,3 +88,32 @@ jobs:
       # Build last: no point producing the bundle if types or tests fail.
       - name: Build
         run: npm run build
+
+  sonarqube:
+    name: SonarQube analysis
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history for accurate "new code" detection and blame data.
+          fetch-depth: 0
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: server/coverage
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage
+          path: client/coverage
+
+      # Reads sonar-project.properties at the repo root. Scan mode (Automatic
+      # Analysis must be disabled in the SonarCloud project settings).
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
