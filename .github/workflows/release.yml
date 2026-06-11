@@ -1,0 +1,60 @@
+name: Release
+
+# Runs AFTER a successful CD run (itself triggered by a version tag). Chaining via
+# workflow_run guarantees the GitHub Release is only created for a version that
+# passed the whole CD pipeline (tests, smoke test, image publication).
+on:
+  workflow_run:
+    workflows: [CD]
+    types: [completed]
+
+permissions:
+  contents: write # create the GitHub Release
+
+jobs:
+  release:
+    name: Create GitHub release
+    # Only when the CD run succeeded. CD only runs on version tags, so the
+    # triggering ref (head_branch) is the tag name.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      # workflow_run uses the workflow file from the default branch, so we must
+      # explicitly check out the commit the tag points to.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Build back-end
+        working-directory: ./server
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+
+      - name: Build front-end
+        working-directory: ./client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package build artifacts
+        run: |
+          tar -czf "orion-crm-server-${TAG}.tgz" -C server dist
+          tar -czf "orion-crm-client-${TAG}.tgz" -C client dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --generate-notes \
+            "orion-crm-server-${TAG}.tgz" \
+            "orion-crm-client-${TAG}.tgz"
