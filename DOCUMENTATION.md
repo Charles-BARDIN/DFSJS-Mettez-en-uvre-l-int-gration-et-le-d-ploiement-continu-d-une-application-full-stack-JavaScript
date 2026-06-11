@@ -167,13 +167,130 @@ afficher)._
 
 ## 3. Plan de conteneurisation et de déploiement
 
+L'application est **entièrement conteneurisée** : le back-end et le front-end ont
+chacun leur image Docker, et l'ensemble est orchestré par **Docker Compose**. Les
+objectifs poursuivis sont la **reproductibilité**, des **images minimales et
+sécurisées**, et un **démarrage en une seule commande**.
+
+Principes communs aux deux Dockerfiles :
+
+- **Builds multi-stage** : séparer l'environnement de construction (lourd) de
+  l'image finale (légère), qui ne contient que le strict nécessaire à l'exécution.
+- **Images de base officielles et minimales** (Alpine), endossées par des
+  communautés influentes.
+- **Exécution sans privilèges** (utilisateur non-root).
+- **Dépendances de production uniquement** et fichiers `.dockerignore` (exclusion
+  de `node_modules`, `dist`, `.env`, `*.db`…).
+- **Aucune donnée sensible** dans les images.
+
 ### 3.1 Dockerfiles
 
-_À compléter en phase B : images de base, ports, optimisations, multi-stage build._
+#### Back-end (`server/Dockerfile`)
+
+Deux étapes :
+
+| Étape | Base | Rôle |
+|---|---|---|
+| `builder` | `node:22-alpine` | `npm ci` (toutes deps), `prisma generate`, `tsc` (TS → `dist/`) |
+| `runner` | `node:22-alpine` | `npm ci --omit=dev` (prod), `prisma generate`, copie du `dist/`, exécution **non-root** (`node`) |
+
+Choix techniques et justifications :
+
+- **`node:22-alpine`** : image officielle, minimale, alignée sur la version de
+  Node du projet (22 LTS).
+- **Migrations appliquées au démarrage** : un script d'entrée
+  (`docker-entrypoint.sh`) exécute `prisma migrate deploy` **avant** de lancer
+  l'API. La commande `migrate deploy` n'applique que les migrations déjà
+  versionnées (ni invite, ni génération), ce qui rend le démarrage **idempotent**
+  et le conteneur **autonome** (il sait se migrer seul).
+- **Base de données** : la base SQLite est stockée dans `/app/data` (répertoire
+  inscriptible appartenant à l'utilisateur `node`), monté sur un **volume** pour
+  la persistance. `DATABASE_URL` est fournie par l'environnement.
+- **Port** exposé : `8080`.
+
+**Arbitrage assumé — taille de l'image.** Comme les migrations s'exécutent au
+démarrage, l'image embarque la **CLI Prisma** (et son moteur de migration), ce qui
+porte l'image à **≈ 574 Mo** — déjà un gain net face à l'image initiale
+mono-stage `node:22` (Debian, ≈ 1,1 Go), grâce à Alpine, au multi-stage, aux
+dépendances de production et au non-root. Une alternative de production
+permettrait de descendre à ≈ 250–300 Mo en sortant les migrations de l'image
+applicative (service de migration dédié exécuté une fois) ; elle n'a pas été
+retenue ici par souci de simplicité (cf. [§8](#8-plan-de-mise-à-jour) et le plan
+de déploiement).
+
+#### Front-end (`client/Dockerfile`)
+
+Deux étapes :
+
+| Étape | Base | Rôle |
+|---|---|---|
+| `builder` | `node:22-alpine` | `npm ci`, `npm run build` (Vite → `dist/`) |
+| `runner` | `nginxinc/nginx-unprivileged:1.27-alpine` | sert les fichiers statiques + reverse-proxy `/api` |
+
+Choix techniques et justifications :
+
+- **Service via Nginx** : le front est une application statique (build Vite) ;
+  Nginx la sert efficacement, bien plus léger qu'un serveur Node de prévisualisation.
+- **`nginxinc/nginx-unprivileged`** : image officielle de l'équipe Nginx,
+  **non-root nativement** (écoute sur le port `8080`).
+- **Base d'API relative** : le build est réalisé avec `VITE_API_URL=/api`
+  (argument de build explicite). L'application appelle donc l'API en **relatif**,
+  et c'est **Nginx qui proxifie `/api`** vers le conteneur back-end. Le front est
+  ainsi **autonome** et indépendant de l'hôte.
+- **`nginx.conf`** : (1) **fallback SPA** (`try_files … /index.html`) pour confier
+  le routage au navigateur ; (2) **reverse-proxy `/api`** vers le service
+  `server`, avec une **résolution DNS effectuée à la requête** (via le resolver
+  Docker) afin que Nginx démarre même si le back-end n'est pas encore prêt et
+  suive ses éventuels redémarrages.
+- Image résultante : **≈ 78,7 Mo**.
+
+#### Synthèse des optimisations
+
+| Image | Avant (mono-stage `node:22`) | Après |
+|---|---|---|
+| Back-end | ≈ 1,1 Go, root | **≈ 574 Mo**, multi-stage Alpine, non-root |
+| Front-end | ≈ 1 Go+ (`vite preview`) | **≈ 78,7 Mo**, Nginx Alpine, non-root |
+
+Bonnes pratiques de sécurité appliquées : images **officielles** et **minimales**
+(Alpine), **exécution non-root**, **dépendances de production** uniquement,
+**aucun secret** ni base de données dans les images (`.dockerignore` exclut
+`.env` et `*.db`).
 
 ### 3.2 docker-compose.yml
 
-_À compléter en phase B : services définis, instructions de lancement local._
+Le fichier `docker-compose.yml` (racine) orchestre les deux services sur le réseau
+par défaut de Compose (réseau *user-defined* → résolution des noms de services par
+le DNS Docker).
+
+| Service | Image | Port (hôte → conteneur) | Points clés |
+|---|---|---|---|
+| `server` | `orion-crm-server` | `8080 → 8080` | volume `db-data` (SQLite persistant), healthcheck, `restart: unless-stopped` |
+| `client` | `orion-crm-client` | `4200 → 8080` | `depends_on: server (service_healthy)`, healthcheck, reverse-proxy `/api` |
+
+- **Volume `db-data`** : monté sur `/app/data` du back-end, il **persiste** la base
+  SQLite entre les redémarrages (vérifié : une donnée créée survit au redémarrage
+  du conteneur).
+- **Healthchecks** : le back-end est sondé sur `/api/health` (via `node`) ; le
+  front sur `/` en vérifiant que le **shell applicatif** est bien servi (et non un
+  simple code 200). Le `client` ne démarre qu'une fois le `server` **`healthy`**
+  (`depends_on: condition: service_healthy`), garantissant un back-end **prêt**
+  (migrations terminées) et pas seulement *lancé*.
+
+**Lancement local**
+
+```bash
+docker compose up --build
+```
+
+On obtient alors :
+
+- Front-end (Nginx) → <http://localhost:4200>
+- Back-end (API) → <http://localhost:8080/api/health>
+
+L'ensemble a été validé de bout en bout : démarrage des deux services jusqu'à
+l'état `healthy`, accès direct à l'API, **proxy `/api` du front vers le back**, et
+parcours complet (création puis lecture d'une organisation via le front →
+persistance en base).
 
 ---
 
