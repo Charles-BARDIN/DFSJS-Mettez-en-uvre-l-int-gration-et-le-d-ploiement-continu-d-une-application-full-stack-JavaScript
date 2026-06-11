@@ -90,6 +90,10 @@ jobs:
           severity: 'HIGH,CRITICAL'
           ignore-unfixed: true
           exit-code: '0'
+          # Disabled: the two matrix legs run in parallel and would race to save
+          # the Trivy DB under the same cache key (noisy "cache save" warnings).
+          # Re-downloading the DB each night is negligible.
+          cache: 'false'
       # Publie les résultats dans l'onglet Security (repo public → gratuit).
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
