@@ -1,209 +1,162 @@
 # Orion CRM
 
-A simplified Customer Relationship Management (CRM) application built with the MERN stack (modernized with TypeScript, Vite, and Prisma).
+A simplified Customer Relationship Management (CRM) application — a modern
+full-stack TypeScript app (React + Express + Prisma) — used here as the basis for
+an **industrialized CI/CD pipeline** (GitHub Actions, Docker, SonarCloud).
+
+![CI](https://github.com/Charles-BARDIN/DFSJS-Mettez-en-uvre-l-int-gration-et-le-d-ploiement-continu-d-une-application-full-stack-JavaScript/actions/workflows/ci.yml/badge.svg)
+
+> **Full technical documentation** (CI/CD, containerization, testing & security
+> plans) is available in [`DOCUMENTATION.md`](./DOCUMENTATION.md).
 
 ## Architecture
 
-This project follows a monorepo structure with separate frontend and backend applications:
+The project is a **monorepo** with two independent applications:
 
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS
-- **Backend**: Node.js 22 + Express 5 + TypeScript + Prisma
+- **Frontend** (`client/`) — React 19, TypeScript, Vite 6, Tailwind CSS
+- **Backend** (`server/`) — Node.js 22, Express 5, TypeScript, Prisma, SQLite
 
-## Prerequisites
+## Quick start (Docker)
 
-- **Node.js** >= 22.0.0
-- **npm** >= 10.0.0
-
-## Installation
-
-### 1. Clone the repository
+The fastest way to run the whole stack is Docker Compose:
 
 ```bash
-git clone <repository-url>
-cd p7-dfsjs
+docker compose up --build
 ```
 
-### 2. Install backend dependencies
+- Frontend (Nginx) → <http://localhost:4200>
+- Backend (API) → <http://localhost:8080/api/health>
+
+The back-end applies its database migrations automatically at startup, so no manual
+database step is required.
+
+## Local development (without Docker)
+
+**Prerequisites:** Node.js ≥ 22 and npm ≥ 10.
 
 ```bash
+# Back-end
 cd server
 npm install
-```
-
-### 3. Configure environment variables
-
-```bash
 cp .env.example .env
-```
-
-Edit `.env` if needed (default values should work for local development).
-
-### 4. Initialize the database
-
-```bash
 npx prisma generate
 npx prisma migrate dev --name init
-```
+npm run dev            # API on http://localhost:8080
 
-### 5. Install frontend dependencies
-
-```bash
-cd ../client
-npm install
-```
-
-### 6. Configure frontend environment
-
-```bash
-cp .env.example .env
-```
-
-## Running the Application
-
-### Start the backend server
-
-```bash
-cd server
-npm run dev
-```
-
-The API will be available at `http://localhost:8080`
-
-### Start the frontend application
-
-In a new terminal:
-
-```bash
+# Front-end (in another terminal)
 cd client
-npm run dev
+npm install
+cp .env.example .env
+npm run dev            # App on http://localhost:4200
 ```
 
-The application will be available at `http://localhost:4200`
+## Available scripts
 
-## Available Scripts
+| Script | Back-end (`server/`) | Front-end (`client/`) |
+|---|---|---|
+| `npm run dev` | dev server (hot reload) | dev server (Vite) |
+| `npm run build` | `tsc` → `dist/` | `vite build` → `dist/` |
+| `npm test` | run tests (Vitest) | run tests (Vitest) |
+| `npm run test:coverage` | tests + coverage report | tests + coverage report |
+| `npm run lint` | ESLint | ESLint |
+| `npm run typecheck` | — | `tsc --noEmit` |
+| `npm run prisma:generate` / `prisma:migrate` / `prisma:studio` | Prisma tooling | — |
 
-### Backend (server/)
+## CI/CD pipeline
 
-- `npm run dev` - Start development server with hot reload
-- `npm run build` - Build for production
-- `npm start` - Start production server
-- `npm test` - Run tests
-- `npm run lint` - Lint code
-- `npm run prisma:generate` - Generate Prisma client
-- `npm run prisma:migrate` - Run database migrations
-- `npm run prisma:studio` - Open Prisma Studio (database GUI)
+The pipeline runs on **GitHub Actions** and is made of three workflows:
 
-### Frontend (client/)
+| Workflow | Trigger | Role |
+|---|---|---|
+| **CI** (`ci.yml`) | pull request + push to `main` | lint, build, tests with coverage, SonarCloud analysis |
+| **Nightly** (`nightly.yml`) | schedule (03:00 UTC) + manual | full non-regression suite, dependency audit, image scan |
+| **CD** (`cd.yml`) | version tag (`vX.Y.Z`) | build, smoke test, publish images to GHCR |
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm test` - Run tests
-- `npm run lint` - Lint code
+A release is triggered by pushing a **SemVer tag** (a deliberate human action), for
+example:
 
-## Project Structure
-
-```
-p7-dfsjs-starter/
-├── client/                 # Frontend React application
-│   ├── src/
-│   │   ├── components/    # Reusable React components
-│   │   ├── pages/         # Page components
-│   │   ├── hooks/         # Custom React hooks
-│   │   ├── services/      # API client services
-│   │   ├── types/         # TypeScript type definitions
-│   │   ├── App.tsx        # Main App component
-│   │   └── main.tsx       # Application entry point
-│   ├── public/
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── Dockerfile
-├── server/                # Backend Express application
-│   ├── src/
-│   │   ├── controllers/   # Route handlers (HTTP layer)
-│   │   ├── services/      # Business logic layer
-│   │   ├── repositories/  # Data access layer
-│   │   ├── models/        # Data models and schemas
-│   │   ├── routes/        # API route definitions
-│   │   └── index.ts       # Server entry point
-│   ├── prisma/
-│   │   └── schema.prisma  # Database schema
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── Dockerfile
-└── README.md
+```bash
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
-## Features
+The CD workflow re-runs the tests, builds the images, validates them with an
+end-to-end smoke test, and only then publishes them. See
+[`DOCUMENTATION.md`](./DOCUMENTATION.md) for the full pipeline description.
 
-- **Dashboard**: View statistics and overview
-- **Contacts Management**: Create, read, update, and delete contacts
-- **Organizations Management**: Manage companies and link them to contacts
-- **RESTful API**: Well-structured backend with Controller-Service-Repository pattern
-- **Type Safety**: Full TypeScript support on frontend and backend
-- **Modern UI**: Tailwind CSS with responsive design
+## Containerization & deployment
 
-## API Endpoints
+Both services ship as **multi-stage, Alpine-based, non-root** Docker images:
+
+- the **back-end** runs the Express API and applies Prisma migrations on startup;
+- the **front-end** is served by Nginx, which also reverse-proxies `/api` to the
+  back-end (the app calls the API on a relative path).
+
+On a version tag, the images are published to **GitHub Container Registry**:
+
+- `ghcr.io/<owner>/orion-crm-server`
+- `ghcr.io/<owner>/orion-crm-client`
+
+A production deployment pulls these images instead of building from source (see the
+deployment plan in [`DOCUMENTATION.md`](./DOCUMENTATION.md)).
+
+## Technical choices (highlights)
+
+- **Quality & security as code** — every change is linted, type-checked, tested
+  (with coverage) and analyzed by SonarCloud before merge; a nightly job audits
+  dependencies (`npm audit`) and scans images (Trivy).
+- **Reproducible builds** — `npm ci` against committed lockfiles, versioned Prisma
+  migrations, and GitHub Actions pinned to explicit versions.
+- **Minimal, hardened images** — official Alpine bases, multi-stage builds,
+  production dependencies only, non-root execution, no secret baked in.
+- **Targeted tests** — focused on business logic (services) and input validation
+  (Zod), enough to prove the pipeline's test stage rather than chase exhaustive
+  coverage.
+
+The rationale behind these choices is detailed in
+[`DOCUMENTATION.md`](./DOCUMENTATION.md).
+
+## Project structure
+
+```
+.
+├── client/                 # Front-end (React + Vite)
+│   ├── src/                # components, pages, hooks, services, types
+│   ├── Dockerfile
+│   └── nginx.conf
+├── server/                 # Back-end (Express + Prisma)
+│   ├── src/                # controllers, services, repositories, models, routes
+│   ├── prisma/             # schema + versioned migrations
+│   ├── Dockerfile
+│   └── docker-entrypoint.sh
+├── .github/workflows/      # ci.yml, nightly.yml, cd.yml
+├── docker-compose.yml
+├── sonar-project.properties
+└── DOCUMENTATION.md        # full technical documentation
+```
+
+## API endpoints
+
+### Health
+
+- `GET /api/health` — service health check (returns `{ "status": "OK" }`)
 
 ### Organizations
 
-- `GET /api/organizations` - Get all organizations
-- `GET /api/organizations/:id` - Get organization by ID
-- `POST /api/organizations` - Create new organization
-- `PUT /api/organizations/:id` - Update organization
-- `DELETE /api/organizations/:id` - Delete organization
-- `GET /api/organizations/stats` - Get organization statistics
+- `GET /api/organizations` — list all
+- `GET /api/organizations/:id` — get by ID
+- `POST /api/organizations` — create
+- `PUT /api/organizations/:id` — update
+- `DELETE /api/organizations/:id` — delete
+- `GET /api/organizations/stats` — statistics
 
 ### Contacts
 
-- `GET /api/contacts` - Get all contacts
-- `GET /api/contacts/:id` - Get contact by ID
-- `POST /api/contacts` - Create new contact
-- `PUT /api/contacts/:id` - Update contact
-- `DELETE /api/contacts/:id` - Delete contact
-- `GET /api/contacts/stats` - Get contact statistics
-
-## Technology Stack
-
-### Frontend
-
-- **React 19**: Modern React with Hooks
-- **TypeScript 5.x**: Static typing
-- **Vite**: Fast build tool
-- **Tailwind CSS**: Utility-first CSS framework
-- **TanStack Query**: Data fetching and caching
-- **Axios**: HTTP client
-- **React Router**: Client-side routing
-- **Zustand**: Lightweight state management
-
-### Backend
-
-- **Node.js 22 LTS**: JavaScript runtime
-- **Express 5**: Web framework
-- **TypeScript 5.x**: Static typing
-- **Prisma**: Modern ORM
-- **SQLite**: Development database
-- **Zod**: Runtime type validation
-- **Vitest**: Testing framework
-
-## Development Guidelines
-
-### Code Style
-
-- Use **TypeScript strict mode**
-- No `any` types allowed
-- Use **functional components** and hooks (no class components)
-- Use `async/await` for asynchronous operations (no callbacks)
-- Follow the **Controller-Service-Repository** pattern on the backend
-
-### Architecture Principles
-
-- **Separation of Concerns**: Clear separation between UI, business logic, and data access
-- **Type Safety**: Define interfaces/types for all data structures
-- **Custom Hooks**: Extract complex logic into reusable hooks
-- **API Layer**: Centralized API calls in service files
-- **Validation**: Use Zod schemas for input validation
+- `GET /api/contacts` — list all
+- `GET /api/contacts/:id` — get by ID
+- `POST /api/contacts` — create
+- `PUT /api/contacts/:id` — update
+- `DELETE /api/contacts/:id` — delete
+- `GET /api/contacts/stats` — statistics
 
 ## License
 
