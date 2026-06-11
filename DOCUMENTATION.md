@@ -235,6 +235,13 @@ La politique de versioning suit **SemVer** (`MAJOR.MINOR.PATCH`) :
   back-end + front-end, qui correspond à la combinaison testée ensemble — il n'y a
   donc **pas de branche dédiée par release**, le tag sur `main` suffit.
 
+La **source de vérité de la version est le tag git** : c'est lui que le pipeline
+utilise (tags d'images, nom de la release, artefacts). Le champ `version` des
+`package.json` n'est lu par aucune étape (l'application n'est pas publiée sur npm) ;
+il est donc neutralisé à **`0.0.0-development`** (convention indiquant une version
+gérée en dehors du fichier) pour signaler explicitement qu'il **ne porte pas** la
+version, plutôt que d'y maintenir une valeur trompeuse.
+
 ### 2.2 Scripts d'automatisation
 
 La logique d'automatisation est centralisée dans les **scripts npm** de chaque
