@@ -319,7 +319,38 @@ complexité, couverture des tests._
 
 ### 5.2 Analyse des risques
 
-_À compléter : vulnérabilités, risques liés au pipeline (secrets, dépendances)._
+#### Gestion des vulnérabilités : deux niveaux selon la maîtrise
+
+Le pipeline distingue deux catégories de vulnérabilités, traitées différemment
+selon notre capacité à agir dessus :
+
+| Source | Maîtrise | Politique | Outil |
+|---|---|---|---|
+| Dépendances applicatives (npm) | Nous | **Gate bloquant** | `npm audit` (nightly) |
+| Paquets OS de l'image de base | Amont (Alpine / Node) | **Monitoring** (report-only) + rebuild périodique | Trivy (nightly) |
+
+**Dépendances npm.** Le job `audit` du workflow *nightly* échoue si une dépendance
+**de production** présente une vulnérabilité *high/critical*
+(`npm audit --omit=dev --audit-level=high`). À ce jour, les dépendances de
+production ont **0 vulnérabilité**. Les alertes existantes (2 critiques, 4
+modérées) concernent uniquement des **devDependencies** (outils de build/test, non
+livrés) : elles sont remontées de façon **informative**, sans bloquer.
+
+**Image de base.** Trivy scanne les images Docker (HIGH/CRITICAL corrigeables). Les
+CVE détectées portent sur des **paquets OS de l'image de base** (openssl, libpng,
+libxml2, zlib…), **hors de notre contrôle** (rythme de publication des correctifs
+par Alpine / Node) et souvent non exploitables par l'application (bibliothèques non
+sollicitées par l'API). Pour éviter la **fatigue d'alerte**, ce scan est
+**en report-only** (il n'échoue pas le *nightly*) : les résultats sont publiés dans
+l'onglet **Security** de GitHub (format SARIF) pour la visibilité, et la
+remédiation passe par un **rebuild périodique** des images — le *nightly*
+reconstruit les images et récupère ainsi les paquets patchés au fil des mises à
+jour amont.
+
+**Risques liés au pipeline.** Les secrets (`SONAR_TOKEN`, `GITHUB_TOKEN`) sont gérés
+via les **secrets GitHub** (jamais en clair, jamais affichés). Aucune donnée
+sensible n'est embarquée dans les images : les `.dockerignore` excluent `.env` et
+`*.db`.
 
 ### 5.3 Plan d'action / Remédiation
 
