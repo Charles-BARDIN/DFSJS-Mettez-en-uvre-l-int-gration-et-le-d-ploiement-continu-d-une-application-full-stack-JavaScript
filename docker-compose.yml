@@ -16,6 +16,11 @@ services:
       - db-data:/app/data
     ports:
       - "8080:8080"
+    labels:
+      # Picked up by Filebeat (add_docker_metadata) to ingest only the Orion
+      # containers. The tier is carried by the log payload itself (Winston
+      # defaultMeta / Nginx log_format), not derived from this label.
+      logging: "orion"
     healthcheck:
       # node is available in the image; avoids depending on curl/wget
       test:
@@ -38,16 +43,20 @@ services:
     ports:
       # host 4200 (familiar dev port) -> container Nginx on 8080
       - "4200:8080"
+    labels:
+      logging: "orion"
     healthcheck:
       # Not just a 200 (the SPA fallback returns 200 for anything): assert the
       # built app shell is actually served.
+      # Hits /healthz, a dedicated location that serves the shell but is excluded
+      # from the access logs (keeps the health-check beat out of the dashboards).
       # Unlike the backend, the Nginx image has no Node runtime, so we use
       # wget | grep. The pipe is a shell feature, hence CMD-SHELL (not CMD).
       # 127.0.0.1 (not localhost): Nginx listens on IPv4 only; "localhost" may
       # resolve to ::1 (IPv6) inside the container and get refused.
       test:
         - CMD-SHELL
-        - wget -q -O - http://127.0.0.1:8080/ | grep -q 'id="root"'
+        - wget -q -O - http://127.0.0.1:8080/healthz | grep -q 'id="root"'
       interval: 10s
       timeout: 5s
       retries: 5

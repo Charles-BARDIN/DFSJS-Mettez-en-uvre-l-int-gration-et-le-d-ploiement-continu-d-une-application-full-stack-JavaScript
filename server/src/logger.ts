@@ -9,6 +9,6 @@ export const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json(),
   ),
-  defaultMeta: { service: 'orion-crm-server' },
+  defaultMeta: { service: 'orion-crm-server', tier: 'backend' },
   transports: [new winston.transports.Console()],
 });
