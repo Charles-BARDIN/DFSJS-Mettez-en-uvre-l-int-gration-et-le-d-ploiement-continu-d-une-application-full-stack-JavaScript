@@ -1,14 +1,14 @@
 name: CI
 
-# Flux par pull request : on valide chaque PR vers main, et l'état de main après
-# merge. Pas de `push` sur toutes les branches (évite les exécutions en double).
+# Pull-request flow: validate every PR to main, and main's state after merge.
+# No `push` on all branches (avoids duplicate runs).
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
-# Annule un run obsolète si un nouveau commit arrive sur la même réf.
+# Cancel an outdated run when a new commit lands on the same ref.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

@@ -1,12 +1,12 @@
 name: Nightly checks
 
-# Vérifications périodiques de non-régression et de sécurité, volontairement HORS
-# du pipeline CI (pas nécessaires à chaque PR). Le nightly détecte ce que le *temps*
-# introduit : nouvelles CVE des dépendances et des images de base.
+# Periodic non-regression and security checks, deliberately OUTSIDE the CI
+# pipeline (not needed on every PR). The nightly catches what *time* introduces:
+# new CVEs in dependencies and base images.
 on:
   schedule:
-    - cron: '0 3 * * *' # tous les jours à 03:00 UTC
-  workflow_dispatch: {} # déclenchement manuel possible
+    - cron: '0 3 * * *' # every day at 03:00 UTC
+  workflow_dispatch: {} # manual trigger
 
 jobs:
   tests:
@@ -53,12 +53,12 @@ jobs:
           cache-dependency-path: ${{ matrix.project }}/package-lock.json
       - name: Install dependencies
         run: npm ci
-      # Gate: échoue si les dépendances de PRODUCTION (ce qui est livré) ont une
-      # vulnérabilité high/critical.
+      # Gate: fail if PRODUCTION dependencies (what ships) have a high/critical
+      # vulnerability.
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
-      # Informatif : remonte les vulnérabilités dev (CI/outils) sans faire échouer
-      # le run (elles ne sont pas livrées).
+      # Informational: surface dev vulnerabilities (CI/tooling) without failing
+      # the run (they are not shipped).
       - name: Audit all dependencies (informational)
         run: npm audit
         continue-on-error: true
@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write # nécessaire pour publier le SARIF dans l'onglet Security
+      security-events: write # required to publish the SARIF to the Security tab
     strategy:
       fail-fast: false
       matrix:
@@ -77,10 +77,9 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build image
         run: docker build -t orion-${{ matrix.service }}:nightly ./${{ matrix.service }}
-      # Report-only (exit-code 0) : les CVE des paquets OS de l'image de base sont
-      # en amont et hors de notre contrôle → on les MONITORE (politique de rebuild)
-      # plutôt que de gater le nightly dessus. Nos propres dépendances, elles, sont
-      # gatées dans le job `audit` ci-dessus.
+      # Report-only (exit-code 0): base-image OS package CVEs are upstream and
+      # outside our control, so we MONITOR them (rebuild policy) rather than gate
+      # the nightly on them. Our own dependencies ARE gated, in the `audit` job above.
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -94,7 +93,7 @@ jobs:
           # the Trivy DB under the same cache key (noisy "cache save" warnings).
           # Re-downloading the DB each night is negligible.
           cache: 'false'
-      # Publie les résultats dans l'onglet Security (repo public → gratuit).
+      # Publish results to the Security tab (free for public repositories).
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         with:
