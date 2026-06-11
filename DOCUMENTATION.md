@@ -139,29 +139,84 @@ organisation, ses commandes et ses contraintes techniques.
   réel : de vrais tests unitaires et d'intégration ont été ajoutés.
 - La couverture (`test:coverage`) nécessitait l'ajout de la dépendance
   `@vitest/coverage-v8` et d'un rapport `lcov` exploitable par SonarCloud.
-- Les **migrations Prisma** doivent être versionnées pour garantir un build
-  Docker / CI reproductible (la base SQLite d'un conteneur étant éphémère).
+- Les **migrations Prisma** doivent être versionnées pour pouvoir **(re)créer le
+  schéma de façon reproductible dans tout environnement neuf** (CI, premier
+  démarrage d'un conteneur sur un volume vide, nouveau déploiement) et servir de
+  **source de vérité** à son évolution.
 - Les **Dockerfiles** initiaux étaient volontairement basiques et destinés à
   être optimisés (multi-stage, image Alpine, exécution sans privilèges).
 
 #### Étapes principales et ordre d'exécution
 
-_À compléter en phase C (CI) : build back-end, build front-end, tests, analyse
-SonarQube, déploiement._
+Le pipeline d'intégration continue (`.github/workflows/ci.yml`) s'exécute sur
+**chaque pull request vers `main`** et sur **chaque `push` sur `main`** (après
+merge). Il se compose de **trois jobs** :
+
+| Job | Étapes (dans l'ordre) | Rôle |
+|---|---|---|
+| `backend` | `npm ci` → `prisma generate` → `lint` → `build` (tsc) → `test:coverage` | valide le back-end |
+| `frontend` | `npm ci` → `lint` → `typecheck` → `test:coverage` → `build` (Vite) | valide le front-end |
+| `sonarqube` | récupère les couvertures → **scan SonarCloud** | qualité & sécurité |
+
+Les jobs `backend` et `frontend` s'exécutent **en parallèle** ; le job `sonarqube`
+**dépend des deux** (`needs`), car il consomme leurs rapports de couverture.
+
+L'ordre des étapes est justifié :
+
+- **Back-end** : `build` = `tsc`, qui **vérifie aussi les types** ; il précède donc
+  les tests (tester un code qui ne compile pas n'aurait pas de sens).
+- **Front-end** : `build` = Vite (esbuild), qui **ne vérifie pas les types** → une
+  étape `typecheck` (`tsc --noEmit`) dédiée est ajoutée ; et le `build` est placé
+  **en dernier** (inutile de produire le bundle si les types ou les tests échouent).
+- **`concurrency: cancel-in-progress`** annule un run devenu obsolète lorsqu'un
+  nouveau commit arrive sur la même référence → pas d'exécutions en double.
 
 #### Justification du choix des actions GitHub
 
-_À compléter en phase C._
+- `actions/checkout` — récupère le code source (le job Sonar utilise
+  `fetch-depth: 0` pour une détection fiable du « new code »).
+- `actions/setup-node` — installe Node 22 et active le **cache npm** (accélère
+  `npm ci` d'un run à l'autre).
+- `actions/upload-artifact` / `actions/download-artifact` — transmettent les
+  rapports de couverture du back-end et du front-end au job Sonar.
+- `SonarSource/sonarqube-scan-action` (épinglée par SHA) — lance l'analyse
+  SonarCloud.
+
+Toutes les actions sont **officielles / maintenues**, épinglées à des versions
+fonctionnant sur le runtime **Node 24**.
 
 ### 2.2 Scripts d'automatisation
 
-_À compléter : scripts utilisés, leur rôle dans le pipeline, comment les exécuter
-ou les adapter._
+La logique d'automatisation est centralisée dans les **scripts npm** de chaque
+projet, réutilisés à l'identique en local et en CI (aucune logique dupliquée dans
+le YAML) :
+
+| Script | Back-end | Front-end |
+|---|---|---|
+| `lint` | `eslint src --ext .ts` | `eslint src --ext .ts,.tsx` |
+| `build` | `tsc` | `vite build` |
+| `test` | `vitest run` | `vitest run` |
+| `test:coverage` | `vitest run --coverage` | `vitest run --coverage` |
+| `typecheck` | — | `tsc --noEmit` |
+| `prisma:generate` / `prisma:migrate` | Prisma | — |
+
+`test` est `vitest run` (exécution unique, déterministe) et **non** `vitest` (mode
+*watch*, qui ne se termine jamais et bloquerait la CI) ; un script `test:watch` est
+réservé au développement local.
 
 ### 2.3 Reproductibilité
 
-_À compléter : comment relancer le pipeline, gestion des secrets (sans jamais les
-afficher)._
+- **Relancer le pipeline** : ouvrir ou mettre à jour une pull request, ou pousser
+  sur `main`, relance la CI. Le *nightly* se déclenche par planification (03:00 UTC)
+  ou manuellement (`workflow_dispatch`).
+- **Installations reproductibles** : la CI utilise `npm ci` (respect strict des
+  *lockfiles*) et les migrations Prisma sont versionnées — installations de
+  dépendances et schéma de base pleinement **déterministes**. Les actions GitHub
+  sont référencées par des **versions explicites** (tag majeur, ou SHA pour
+  l'action tierce SonarCloud), garantissant un comportement **stable dans le temps**.
+- **Gestion des secrets** : `SONAR_TOKEN` est stocké dans les **secrets GitHub**
+  (jamais en clair, masqué dans les logs) ; `GITHUB_TOKEN` (intégré) servira au
+  déploiement. Aucun secret n'est écrit dans le code ni dans les images.
 
 ---
 
@@ -298,15 +353,48 @@ persistance en base).
 
 ### 4.1 Types de tests automatisés
 
-_À compléter en phase C : tests unitaires, d'intégration, de sécurité (SonarQube)._
+| Type | Outil | Portée |
+|---|---|---|
+| Tests unitaires (back) | Vitest | services (logique métier, *repository* mocké) + validation Zod (modèles) |
+| Tests de composants (front) | Vitest + Testing Library | rendu d'un composant présentational (`Card`) |
+| Qualité & sécurité statique | SonarCloud | vulnérabilités, *code smells*, complexité, couverture |
+| Audit des dépendances | `npm audit` (*nightly*) | vulnérabilités des paquets npm |
+| Scan des images | Trivy (*nightly*) | CVE des images Docker |
+
+**Une stratégie de tests ciblée, pas exhaustive.** Dans ce projet d'industrialisation
+CI/CD, les tests servent à **prouver que l'étape de test du pipeline fonctionne et
+vérifie un comportement réel de l'application**, et non à viser une couverture
+maximale. La couverture est donc concentrée sur la **logique métier** (services) et
+la **validation des entrées** (schémas Zod) — là où se prennent les vraies décisions
+de l'application — tandis que la « tuyauterie » fine (contrôleurs, routes) est
+volontairement laissée de côté. Ce choix respecte le principe « ne pas créer de
+complexité inutile ». Dans le même esprit, les **tests end-to-end UI**
+(navigateur) sont hors périmètre et identifiés comme amélioration future
+(cf. [§9](#9-conclusion)).
 
 ### 4.2 Fréquence d'exécution
 
-_À compléter : sur push, sur pull request, exécution périodique, avant release._
+| Déclencheur | Tests exécutés |
+|---|---|
+| **Pull request** vers `main` | CI complète : lint, build, tests + couverture, analyse SonarCloud (décoration de PR) |
+| **Push sur `main`** (après merge) | CI complète + analyse SonarCloud de la **branche `main`** (référence du Quality Gate) |
+| **Périodique — *nightly*** (03:00 UTC, ou `workflow_dispatch`) | suite de tests **complète** de non-régression + `npm audit` + scan Trivy. Volontairement **hors CI** (trop lourd pour chaque PR) |
+| **Avant release** (tag `vX.Y.Z`) | le pipeline de déploiement **rejoue les tests** et exécute un **smoke test** des images (cf. plan de déploiement) |
 
 ### 4.3 Objectifs des tests
 
-_À compléter : qualité, non-régression, vérification avant déploiement._
+- **Validation fonctionnelle** : vérifier que l'application a le comportement attendu
+  (erreur « not found », garde avant suppression, rejet d'une entrée invalide…).
+- **Non-régression** : la suite est rejouée à chaque PR, à chaque merge et chaque
+  nuit, pour détecter toute régression (y compris une dérive d'environnement).
+- **Qualité & sécurité** : SonarCloud et les audits surveillent dette technique,
+  vulnérabilités et duplication.
+- **Garantir un `main` déployable** : la CI agit comme garde-fou avant tout merge.
+
+**Critères d'alerte.** Un test en échec **bloque la PR** ; le **Quality Gate**
+SonarCloud signale un dépassement des seuils de qualité/sécurité ; le gate
+`npm audit` (dépendances de production) bloque le *nightly* ; le scan Trivy est en
+*report-only* (cf. [§5.2](#52-analyse-des-risques)).
 
 ---
 
@@ -314,8 +402,33 @@ _À compléter : qualité, non-régression, vérification avant déploiement._
 
 ### 5.1 Résultats SonarQube
 
-_À compléter en phases C puis I : vulnérabilités, code smells critiques, zones de
-complexité, couverture des tests._
+#### Rôle et intégration
+
+SonarCloud assure l'**inspection continue** de la qualité et de la sécurité du code.
+Il est intégré au pipeline CI via le job `sonarqube` (`.github/workflows/ci.yml`),
+qui :
+
+- lit la configuration `sonar-project.properties` (sources back-end + front-end,
+  exclusions, chemins des rapports de couverture) ;
+- consomme les **rapports de couverture** (`lcov`) produits par les tests ;
+- effectue une **décoration de la pull request** (sur les PR) et une **analyse de la
+  branche `main`** après merge — cette dernière fixant la référence du *Quality Gate*
+  et de la période « new code ».
+
+#### Éléments surveillés
+
+- **Vulnérabilités** et *security hotspots* (sécurité),
+- **Code smells** et **complexité** (maintenabilité),
+- **Duplication** de code,
+- **Couverture** des tests.
+
+Le **Quality Gate** synthétise ces critères en un verdict *passed / failed*, évalué
+en priorité sur le **nouveau code** de chaque pull request.
+
+> Les **résultats mesurés** (vulnérabilités, *code smells* critiques, zones de
+> complexité, taux de couverture) et leur analyse détaillée sont présentés dans la
+> partie finale de la documentation (cf. [§5.3](#53-plan-daction--remédiation) et
+> l'analyse des métriques), une fois plusieurs analyses accumulées.
 
 ### 5.2 Analyse des risques
 
@@ -412,8 +525,24 @@ _À compléter : conseils pour maintenir la solution dans le temps._
 
 ## 9. Conclusion
 
-_À compléter en phase J : résumé des améliorations, gains observés (fiabilité,
-rapidité, qualité), recommandations pour les itérations suivantes._
+_Résumé des améliorations et gains observés (fiabilité, rapidité, qualité) : à
+compléter en phase finale._
+
+### Recommandations pour les itérations suivantes
+
+- **Tests end-to-end (UI)** : le périmètre s'est concentré sur des tests
+  unitaires et de composant (qui alimentent la couverture) et une validation de
+  bout en bout au niveau HTTP (*smoke test* de la stack lors du déploiement,
+  cf. §3). Une étape pertinente serait d'ajouter un **test end-to-end navigateur**
+  (par exemple avec Playwright) pilotant des parcours utilisateurs complets
+  (interface → API → base de données) ; le dossier `client/tests/e2e/` est
+  d'ailleurs déjà prévu à cet effet. Ce type de test a été **volontairement écarté
+  du périmètre initial** — le projet visant l'industrialisation CI/CD et
+  l'observabilité, et aucun *runner* end-to-end n'étant fourni par le dépôt
+  d'origine — afin de ne pas introduire d'outillage lourd (navigateurs en CI,
+  gestion de l'instabilité des tests) au-delà du nécessaire. Il s'intégrerait
+  naturellement comme **job *nightly*** : montée de la stack via Docker Compose,
+  exécution des scénarios, puis publication du rapport en artefacts.
 
 ---
 
