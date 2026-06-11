@@ -1,0 +1,15 @@
+# Dependencies and build artifacts (reinstalled / rebuilt inside the image)
+node_modules
+dist
+coverage
+
+# Local environment (never bake env into the static build → keep relative /api)
+.env
+.env.*
+
+# Tooling / VCS / docs not needed at build time
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.log
