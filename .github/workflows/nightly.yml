@@ -92,7 +92,7 @@ jobs:
           exit-code: '0'
       # Publie les résultats dans l'onglet Security (repo public → gratuit).
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-${{ matrix.service }}.sarif'
           category: 'trivy-${{ matrix.service }}'
