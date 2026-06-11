@@ -1,0 +1,97 @@
+name: CD
+
+# Continuous deployment, triggered by a version tag (vX.Y.Z). On a tag:
+#   1. (gate) re-run the tests — never publish an untested artifact;
+#   2. build the Docker images;
+#   3. SMOKE TEST end-to-end: the stack boots + a CRUD round-trip through the proxy;
+#   4. publish the images to GHCR — only if the smoke test passes.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  test:
+    name: Test gate (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [server, client]
+    defaults:
+      run:
+        working-directory: ./${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        if: matrix.project == 'server'
+        run: npx prisma generate
+      - name: Run tests
+        run: npm run test
+
+  release:
+    name: Build, smoke-test and publish images
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # publish to GHCR via GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Smoke test (stack boots + end-to-end CRUD via the proxy)
+        run: |
+          set -euo pipefail # -e: stop on error · -u: error on unset var · -o pipefail: any failing pipe stage fails the pipe
+          # Wait for both services to be healthy (compose healthchecks).
+          docker compose up -d --wait --wait-timeout 120
+
+          echo "→ Frontend serves the SPA"
+          curl -sf http://localhost:4200/ | grep -q 'id="root"'
+
+          echo "→ API responds directly"
+          curl -sf http://localhost:8080/api/health | jq -e '.status == "OK"' > /dev/null
+
+          echo "→ Front → back proxy works"
+          curl -sf http://localhost:4200/api/health | jq -e '.status == "OK"' > /dev/null
+
+          echo "→ CRUD round-trip through the proxy (front → back → database)"
+          id=$(curl -sf -X POST http://localhost:4200/api/organizations \
+                 -H 'Content-Type: application/json' \
+                 -d '{"name":"Smoke Test Org"}' | jq -r '.id')
+          if [ -z "$id" ] || [ "$id" = "null" ]; then
+            echo "POST did not return a valid organization id" >&2
+            exit 1
+          fi
+          curl -sf "http://localhost:4200/api/organizations/$id" | jq -e '.name == "Smoke Test Org"' > /dev/null
+          curl -sf -X DELETE "http://localhost:4200/api/organizations/$id"
+          echo "Smoke test OK"
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Tag and push images to GHCR
+        run: |
+          set -e
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          TAG="${{ github.ref_name }}"
+          for svc in server client; do
+            src="orion-crm-$svc"
+            dest="ghcr.io/$OWNER/orion-crm-$svc"
+            docker tag "$src" "$dest:$TAG"
+            docker tag "$src" "$dest:latest"
+            docker push "$dest:$TAG"
+            docker push "$dest:latest"
+          done
