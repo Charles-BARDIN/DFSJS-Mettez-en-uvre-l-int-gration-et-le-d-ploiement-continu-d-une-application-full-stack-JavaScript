@@ -416,8 +416,8 @@ unitaires, qui portent sur le code source, ne couvrent pas.
 **Images publiées.** Chaque service est poussé sous deux étiquettes, la version
 (`vX.Y.Z`) et `latest` :
 
-- `ghcr.io/<owner>/orion-crm-server`
-- `ghcr.io/<owner>/orion-crm-client`
+- `ghcr.io/charles-bardin/orion-crm-server`
+- `ghcr.io/charles-bardin/orion-crm-client`
 
 La publication s'appuie sur le `GITHUB_TOKEN` intégré (permission `packages: write`),
 sans aucun secret supplémentaire à gérer.
@@ -431,13 +431,13 @@ GHCR depuis un fichier d'orchestration dédié qui les **référence** :
 # docker-compose.prod.yml
 services:
   server:                                    # le nom du service est aussi son nom DNS
-    image: ghcr.io/<owner>/orion-crm-server:vX.Y.Z
+    image: ghcr.io/charles-bardin/orion-crm-server:vX.Y.Z
     environment:
       DATABASE_URL: file:/app/data/prod.db
     volumes:
       - db-data:/app/data
   client:
-    image: ghcr.io/<owner>/orion-crm-client:vX.Y.Z
+    image: ghcr.io/charles-bardin/orion-crm-client:vX.Y.Z
     depends_on:
       server:
         condition: service_healthy

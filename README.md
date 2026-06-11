@@ -93,8 +93,8 @@ Both services ship as **multi-stage, Alpine-based, non-root** Docker images:
 
 On a version tag, the images are published to **GitHub Container Registry**:
 
-- `ghcr.io/<owner>/orion-crm-server`
-- `ghcr.io/<owner>/orion-crm-client`
+- `ghcr.io/charles-bardin/orion-crm-server`
+- `ghcr.io/charles-bardin/orion-crm-client`
 
 A production deployment pulls these images instead of building from source (see the
 deployment plan in [`DOCUMENTATION.md`](./DOCUMENTATION.md)).
