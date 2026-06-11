@@ -45,8 +45,8 @@ des **contrôles de qualité et de sécurité du code**.
 
 L'industrialisation poursuit cinq objectifs :
 
-- **automatiser** la construction (*build*), les tests et le déploiement du front-end
-  et du back-end ;
+- **automatiser** la construction (*build*), les tests et la **livraison** (publication
+  des images) du front-end et du back-end ;
 - **garantir la qualité et la sécurité** du code par une analyse statique continue
   (SonarCloud) et par la réduction des risques de sécurité de la **chaîne de
   livraison** (en référence au standard OWASP) ;
@@ -144,8 +144,9 @@ complémentaires, chacun déclenché à un moment différent du cycle de dévelo
 | Intégration continue (CI) | `ci.yml` | pull request + push sur `main` | lint, build, tests avec couverture, analyse SonarCloud |
 | Tests périodiques (*nightly*) | `nightly.yml` | planification (03:00 UTC) + manuel | non-régression complète, audit des dépendances, scan des images |
 | Déploiement continu (CD) | `cd.yml` | tag de version (`vX.Y.Z`) | build, *smoke test*, publication des images sur GHCR |
+| Release | `release.yml` | après un **CD réussi** (lui-même sur tag) | release GitHub versionnée + artefacts de build |
 
-Les trois workflows sont décrits ci-dessous. Le *nightly* et le déploiement font en
+Les quatre workflows sont décrits ci-dessous. Le *nightly* et le déploiement font en
 outre l'objet de sections dédiées : le volet *testing* du *nightly* dans le
 [plan de testing périodique](#4-plan-de-testing-périodique) (§4), son volet *sécurité*
 (audit des dépendances, scan des images) dans l'[analyse des risques](#52-analyse-des-risques)
@@ -209,6 +210,30 @@ vulnérabilités dans les dépendances ou les images de base — indépendamment
 modification du code. Son contenu est détaillé dans le plan de testing périodique
 ([§4](#4-plan-de-testing-périodique)) et le plan de sécurité
 ([§5.2](#52-analyse-des-risques)).
+
+#### Releases et politique de versioning
+
+Le workflow `release.yml` s'exécute **après la publication réussie des images** : il est
+chaîné au workflow CD (déclencheur `workflow_run`), de sorte que la release n'est créée
+**que pour une version ayant passé l'intégralité du pipeline** — tests, *smoke test* et
+publication des images sur GHCR. On ne crée donc jamais de release pour une version dont
+l'un de ces contrôles aurait échoué. Il automatise la
+**création de la release GitHub** : il construit les artefacts de l'application (builds
+`server` et `client`), génère les notes de version à partir des commits depuis le tag
+précédent, et publie une release versionnée avec ces artefacts attachés. Les images
+Docker, elles, sont publiées sur GHCR par le CD (cf. [§3.3](#33-plan-de-déploiement-cd)).
+
+La politique de versioning suit **SemVer** (`MAJOR.MINOR.PATCH`) :
+
+- une **release est déclenchée par la création d'un tag** — une **action humaine**
+  délibérée, sans release candidate automatique à chaque commit ;
+- l'incrément de version est **décidé par le développeur** (correctif → *patch*,
+  fonctionnalité → *minor*, rupture → *major*), et non dérivé automatiquement des
+  messages de commit (le projet n'utilise donc pas un outil comme *semantic-release*,
+  afin de garder un contrôle explicite sur les versions) ;
+- l'application est versionnée comme **un seul produit** : un tag publie l'ensemble
+  back-end + front-end, qui correspond à la combinaison testée ensemble — il n'y a
+  donc **pas de branche dédiée par release**, le tag sur `main` suffit.
 
 ### 2.2 Scripts d'automatisation
 
