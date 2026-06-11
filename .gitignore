@@ -14,10 +14,9 @@ build/
 */dist/
 */build/
 
-# Database
+# Database (the SQLite file is local only; Prisma migrations ARE versioned)
 *.db
 *.db-journal
-prisma/migrations/
 
 # Logs
 logs/
