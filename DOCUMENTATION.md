@@ -202,7 +202,10 @@ comment l'exécuter — est détaillée en [§3.3](#33-plan-de-déploiement-cd).
 #### Tests périodiques (*nightly*)
 
 Le workflow `nightly.yml` s'exécute chaque nuit (03:00 UTC) et peut aussi être
-déclenché manuellement (`workflow_dispatch`). Il est volontairement maintenu **hors
+déclenché manuellement (`workflow_dispatch`). À noter que la planification de GitHub
+Actions est *best-effort* : l'heure configurée n'est pas garantie à la minute près et
+l'exécution peut être décalée de plusieurs heures en cas de forte charge — le moment
+exact importe peu pour un contrôle quotidien. Il est volontairement maintenu **hors
 du pipeline CI** : il rejoue la suite de tests complète en non-régression, audite les
 vulnérabilités des dépendances (`npm audit`) et scanne les images Docker (Trivy).
 Cette périodicité vise à détecter ce que le *temps* introduit — de nouvelles
