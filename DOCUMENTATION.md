@@ -688,11 +688,18 @@ docker compose -f docker-compose-elk.yml up -d    # stack ELK + Filebeat
 ```
 
 **Tableaux de bord.** Un tableau de bord Kibana — *« Orion — Observabilité »* —
-regroupe **cinq visualisations** couvrant les trois axes demandés (erreurs, tendances,
-performances) : le **volume de logs par tier** dans le temps, les **erreurs HTTP par
-statut**, la **répartition des statuts HTTP**, le **temps de réponse moyen** du
-back-end, et la **répartition des logs par tier**. Les captures correspondantes sont
-présentées en **[Annexes](#annexes)**. Le dashboard est **versionné** dans le dépôt
+regroupe **six visualisations** couvrant les axes demandés (volumétrie, pics
+d'activité, erreurs, performances) : le **volume de logs par tier** dans le temps, l'
+**activité (requêtes HTTP)** dans le temps, les **erreurs HTTP par statut**,
+la **répartition des statuts HTTP**, le **temps de réponse moyen** du back-end, et la
+**répartition des logs par tier**. L'**activité (requêtes HTTP)** est une *métrique dérivée
+des logs* (agrégation par tranche de temps) : à la différence du *volume de logs* — qui
+compte **toutes** les lignes —, elle ne compte que les **requêtes HTTP** vues à l'edge
+(tier frontend, filtrées sur la présence d'une **méthode HTTP**, chacune comptée une
+fois), ce qui en fait l'indicateur de **pic d'activité**. Le filtre sur la méthode HTTP
+le rend **robuste** : il resterait juste même si d'autres logs front (par ex. applicatifs)
+venaient à être ingérés, car ceux-ci ne portent pas de méthode HTTP. Les
+captures correspondantes sont présentées en **[Annexes](#annexes)**. Le dashboard est **versionné** dans le dépôt
 (export NDJSON sous `elk/kibana/`) : il ne vit donc pas seulement dans le volume
 `es-data` mais se **réimporte** dans une instance Kibana neuve, à l'image des migrations
 Prisma pour la base de données.
@@ -801,9 +808,9 @@ référencées depuis les sections correspondantes du document.
 
 ### Monitoring (stack ELK)
 
-**Figure 1 — Tableau de bord « Orion — Observabilité »** (cf. § 6.1) : les cinq
-visualisations — volume par tier, erreurs par statut, répartition des statuts HTTP,
-temps de réponse back-end, répartition des logs par tier.
+**Figure 1 — Tableau de bord « Orion — Observabilité »** (cf. § 6.1) : les six
+visualisations — volume par tier, activité (requêtes HTTP), erreurs par statut,
+répartition des statuts HTTP, temps de réponse back-end, répartition des logs par tier.
 
 ![Tableau de bord Orion — Observabilité](docs/screenshots/elk-01-dashboard.png)
 
