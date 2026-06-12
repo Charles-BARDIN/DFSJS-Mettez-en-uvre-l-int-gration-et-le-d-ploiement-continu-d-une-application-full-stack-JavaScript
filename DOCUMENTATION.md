@@ -687,9 +687,23 @@ docker compose -f docker-compose-elk.yml up -d    # stack ELK + Filebeat
 # Kibana : http://localhost:5601   —   Elasticsearch : http://localhost:9200
 ```
 
-**Tableaux de bord.** Les visualisations attendues (répartition des niveaux de log
-et des statuts HTTP, **volume de requêtes dans le temps**, **erreurs** 4xx/5xx,
-**temps de réponse**) et leurs captures sont présentées en **[Annexes](#annexes)**.
+**Tableaux de bord.** Un tableau de bord Kibana — *« Orion — Observabilité »* —
+regroupe **cinq visualisations** couvrant les trois axes demandés (erreurs, tendances,
+performances) : le **volume de logs par tier** dans le temps, les **erreurs HTTP par
+statut**, la **répartition des statuts HTTP**, le **temps de réponse moyen** du
+back-end, et la **répartition des logs par tier**. Les captures correspondantes sont
+présentées en **[Annexes](#annexes)**.
+
+L'**agrégation est consciente du tier**, afin d'éviter le double comptage inhérent à
+une architecture à deux couches (chaque requête vers l'API est journalisée **à la fois**
+par Nginx et par le back-end). Les métriques de **trafic et d'erreurs** sont donc
+calculées sur le **tier frontend** : point d'entrée, il voit **l'intégralité** des
+requêtes, chacune **une seule fois**, y compris les erreurs propres à l'edge (par
+exemple un *413 Payload Too Large* rejeté par Nginx avant même d'atteindre l'API). La
+**latence applicative** est mesurée sur le **tier back-end**, seul porteur du champ
+`durationMs`. Le **volume de logs**, lui, agrège les **deux** tiers : il compte des
+*lignes de log*, et le back-end en produit aussi hors requêtes (démarrage, erreurs).
+
 La capture des erreurs JavaScript **côté navigateur** (React) a été laissée hors
 périmètre pour ne pas alourdir l'application ; elle est identifiée comme amélioration
 future (cf. [§9](#9-conclusion)).
@@ -779,5 +793,36 @@ compléter en phase finale._
 
 ## Annexes
 
-_À compléter : captures SonarQube, captures de logs / dashboards ELK, extraits de
-workflows, commandes utiles._
+Les captures ci-dessous illustrent le monitoring et l'analyse qualité ; elles sont
+référencées depuis les sections correspondantes du document.
+
+### Monitoring (stack ELK)
+
+**Figure 1 — Tableau de bord « Orion — Observabilité »** (cf. § 6.1) : les cinq
+visualisations — volume par tier, erreurs par statut, répartition des statuts HTTP,
+temps de réponse back-end, répartition des logs par tier.
+
+![Tableau de bord Orion — Observabilité](docs/screenshots/elk-01-dashboard.png)
+
+**Figure 2 — Logs structurés dans Kibana Discover** : les logs JSON (`tier`, `method`,
+`path`, `status`, `durationMs`…) en colonnes, avec un document déplié montrant la
+structure complète.
+
+![Logs structurés dans Kibana Discover](docs/screenshots/elk-02-discover-logs.png)
+
+### Qualité & sécurité (SonarCloud)
+
+**Figure 3 — Vue d'ensemble du projet** (cf. § 5.1) : statut du Quality Gate, notes de
+fiabilité / sécurité / maintenabilité, couverture et duplication.
+
+![Vue d'ensemble SonarCloud](docs/screenshots/sonar-overview.png)
+
+**Figure 4 — Vulnérabilités identifiées** : les deux vulnérabilités (divulgation de la
+version du framework, configuration CORS).
+
+![Vulnérabilités SonarCloud](docs/screenshots/sonar-vulnerabilites.png)
+
+**Figure 5 — Alertes prioritaires (sévérité Medium)** : extrait des *code smells* de
+sévérité Medium.
+
+![Alertes prioritaires SonarCloud](docs/screenshots/sonar-issues-medium.png)
