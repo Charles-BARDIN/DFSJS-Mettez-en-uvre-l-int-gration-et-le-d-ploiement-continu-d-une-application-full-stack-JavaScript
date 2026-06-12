@@ -594,9 +594,13 @@ Components* (via `npm audit` et le scan Trivy), *A05 – Security Misconfigurati
 Data Integrity Failures* (actions épinglées par empreinte de commit, `npm ci` sur
 *lockfiles*, images de base figées), *A03 – Injection* (requêtes paramétrées via
 Prisma, validation des entrées par Zod, règles SonarCloud) et *A09 – Security Logging
-and Monitoring Failures* (centralisation des logs via la stack ELK). Les autres
-catégories — contrôle d'accès, authentification, chiffrement, conception — relèvent de
-la **sécurité applicative** et sortent du périmètre de cette industrialisation CI/CD.
+and Monitoring Failures* (centralisation des logs via la stack ELK). À ce titre, les
+logs respectent la **minimisation des données** : ils ne capturent que des métadonnées
+techniques (méthode, chemin, statut, latence) et **jamais le corps des requêtes**, afin
+de ne pas dupliquer de données personnelles (CRM) ni de secrets dans le système de logs.
+Les autres catégories — contrôle d'accès, authentification, chiffrement, conception —
+relèvent de la **sécurité applicative** et sortent du périmètre de cette
+industrialisation CI/CD.
 
 ### 5.3 Plan d'action / Remédiation
 
@@ -606,17 +610,98 @@ _À compléter en phase I : actions immédiates, court terme, long terme._
 
 ## 6. Monitoring, métriques & KPI
 
-### 6.1 Métriques DORA
+### 6.1 Monitoring local des logs (stack ELK)
+
+Pour observer l'application en fonctionnement, les logs des deux tiers sont
+**centralisés** dans une stack **ELK** (Elasticsearch, Logstash, Kibana) montée
+localement via Docker Compose. L'objectif est de disposer d'un tableau de bord
+unique visualisant les **erreurs**, les **tendances** (volume de requêtes) et les
+**performances** (temps de réponse) de l'application.
+
+**Architecture de collecte.** Le flux suit la chaîne **Beats + ELK** classique :
+
+```
+conteneurs applicatifs (stdout JSON)
+        │
+        ▼
+   Filebeat ──► Logstash ──► Elasticsearch ──► Kibana
+ (collecte)    (parsing)     (indexation)    (visualisation)
+```
+
+- **Sources.** Les deux tiers émettent **un log JSON par ligne sur la sortie
+  standard**, que Docker capture nativement (driver `json-file`). Le **back-end**
+  produit ces logs via un *logger* Winston structuré ; le **front-end**
+  (Nginx) est configuré avec un `log_format` JSON pour ses *access logs*. Chaque
+  événement porte un champ **`tier`** (`backend` / `frontend`) qui permet de les
+  distinguer dans Kibana.
+- **Filebeat** lit les fichiers de logs des conteneurs et n'ingère que ceux de
+  l'application, identifiés par le label Docker `logging=orion` (les conteneurs de
+  la stack ELK elle-même sont ainsi exclus). Il transmet chaque ligne à Logstash.
+- **Logstash** applique un **pipeline minimal** : il décode le JSON de chaque
+  ligne en champs exploitables, écarte le bruit non applicatif (lignes de
+  démarrage sans champ `tier`) et, par sécurité, les éventuels *health checks*,
+  puis indexe le résultat dans Elasticsearch.
+- **Elasticsearch** stocke les événements dans un index quotidien
+  `orion-logs-AAAA.MM.JJ` ; **Kibana** les expose via la *data view* `orion-logs-*`
+  (champ temporel `@timestamp`).
+
+**Choix de configuration.** La stack vit dans un **fichier Compose distinct**
+(`docker-compose-elk.yml`), pour deux raisons. D'abord, **le monitoring est une
+préoccupation d'exploitation, pas de livraison** : ELK observe une application *en
+fonctionnement* dans son environnement, il n'a donc pas sa place dans le pipeline
+CI/CD, dont le rôle est de **construire, tester et publier**. Un pipeline n'exécute que
+des conteneurs éphémères de build et de test ; il n'y a rien de durable à y observer.
+C'est aussi ce que recommande explicitement l'énoncé (**ne pas intégrer ELK au CI/CD**).
+Ensuite, isoler la stack dans son propre fichier permet de la **lancer à la demande**,
+sans l'imposer à chaque démarrage de l'application. Elasticsearch tourne en **nœud
+unique, en mode développement** (sécurité xpack désactivée : ni TLS ni authentification),
+ce qui est acceptable en local mais **ne conviendrait pas en production**. Les *heaps*
+Java sont volontairement **bornés — 1 Go pour Elasticsearch, 512 Mo pour Logstash —**
+afin de maîtriser la consommation mémoire sur un poste de développement.
+
+**Privilèges de Filebeat — limite assumée en local.** Pour lire les fichiers de logs
+des conteneurs (écrits par le démon Docker, donc par *root*) et récupérer leurs
+métadonnées, le conteneur Filebeat tourne en **`root`** et accède au **socket Docker**.
+C'est acceptable sur un poste de développement isolé, mais ce serait une **mauvaise
+pratique en production**, car l'accès au socket Docker équivaut à un contrôle de la
+machine hôte. Un déploiement orchestré (Kubernetes) appliquerait le principe de
+**moindre privilège** : l'agent y lit les logs avec des droits **restreints au strict
+nécessaire** et obtient les métadonnées via l'**API de l'orchestrateur** (en lecture
+seule), **sans exposer le socket Docker**.
+
+**Exclusion du bruit de *health check*.** Les sondes de santé des conteneurs sont
+exclues **à la source**, de façon symétrique sur les deux tiers, pour ne pas fausser
+les métriques de volume et d'erreur : le back-end ignore `/api/health` dans son
+*middleware* de journalisation, et le front-end sert sa sonde sur une *location*
+dédiée `/healthz` configurée en `access_log off`.
+
+**Mise en route.** Après avoir démarré l'application, on lance la stack
+d'observation :
+
+```bash
+docker compose up -d --build                      # application (back + front)
+docker compose -f docker-compose-elk.yml up -d    # stack ELK + Filebeat
+# Kibana : http://localhost:5601   —   Elasticsearch : http://localhost:9200
+```
+
+**Tableaux de bord.** Les visualisations attendues (répartition des niveaux de log
+et des statuts HTTP, **volume de requêtes dans le temps**, **erreurs** 4xx/5xx,
+**temps de réponse**) et leurs captures sont présentées en **[Annexes](#annexes)**.
+La capture des erreurs JavaScript **côté navigateur** (React) a été laissée hors
+périmètre pour ne pas alourdir l'application ; elle est identifiée comme amélioration
+future (cf. [§9](#9-conclusion)).
+
+### 6.2 Métriques DORA
 
 _À compléter en phase H : Lead Time, Deployment Frequency, MTTR, Change Failure
 Rate (méthode de calcul + valeurs observées)._
 
-### 6.2 KPI personnalisés
+### 6.3 KPI personnalisés
 
 _À compléter : temps de build, temps des tests, taux d'erreurs dans les logs,
 autres KPI pertinents._
 
-### 6.3 Analyse synthétique du monitoring
+### 6.4 Analyse synthétique du monitoring
 
 _À compléter : tendances, points forts, points à améliorer, dashboards, alertes._
 
@@ -676,6 +761,16 @@ compléter en phase finale._
   l'instabilité des tests) au-delà du nécessaire. Il s'intégrerait naturellement comme
   job *nightly* : montée de la stack via Docker Compose, exécution des scénarios, puis
   publication du rapport en artefacts.
+- **Centralisation des erreurs front-end (navigateur).** Le monitoring ELK ingère les
+  logs applicatifs du back-end (Winston) et du tier front-end via les *access logs*
+  Nginx (requêtes, statuts, temps de réponse) — ce qui couvre déjà les erreurs HTTP
+  4xx/5xx. Les erreurs **JavaScript survenant dans le navigateur** (exceptions de rendu
+  React, promesses rejetées) ne remontent en revanche pas, faute d'être visibles côté
+  serveur. Une itération future pourrait les capturer via un *handler* global
+  (`window.onerror` / *Error Boundary* React) postant les erreurs vers un *endpoint*
+  dédié du back-end, qui les journaliserait à son tour vers ELK. Cette piste a été
+  écartée du périmètre initial pour ne pas ajouter de code applicatif au-delà du
+  nécessaire, conformément à la recommandation de l'énoncé de limiter la complexité.
 
 ---
 
