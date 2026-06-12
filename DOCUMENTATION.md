@@ -692,7 +692,10 @@ regroupe **cinq visualisations** couvrant les trois axes demandés (erreurs, ten
 performances) : le **volume de logs par tier** dans le temps, les **erreurs HTTP par
 statut**, la **répartition des statuts HTTP**, le **temps de réponse moyen** du
 back-end, et la **répartition des logs par tier**. Les captures correspondantes sont
-présentées en **[Annexes](#annexes)**.
+présentées en **[Annexes](#annexes)**. Le dashboard est **versionné** dans le dépôt
+(export NDJSON sous `elk/kibana/`) : il ne vit donc pas seulement dans le volume
+`es-data` mais se **réimporte** dans une instance Kibana neuve, à l'image des migrations
+Prisma pour la base de données.
 
 L'**agrégation est consciente du tier**, afin d'éviter le double comptage inhérent à
 une architecture à deux couches (chaque requête vers l'API est journalisée **à la fois**
