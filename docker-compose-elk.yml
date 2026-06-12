@@ -1,0 +1,94 @@
+# Local observability stack (ELK + Filebeat) for the Orion CRM.
+#
+# Standalone from the application compose file (NOT wired into CI/CD: too heavy).
+# Start the app first, then this stack:
+#   docker compose up -d --build
+#   docker compose -f docker-compose-elk.yml up -d
+#
+# Endpoints: Elasticsearch http://localhost:9200 | Kibana http://localhost:5601
+#
+# Pipeline: app containers (stdout JSON) -> Filebeat -> Logstash -> Elasticsearch -> Kibana
+#
+# Dev-only configuration: single-node Elasticsearch with security disabled
+# (no TLS / no auth). Do NOT use as-is in production.
+# Java heaps are bounded (1g Elasticsearch, 512m Logstash) to keep memory in
+# check on a dev box — see ES_JAVA_OPTS / LS_JAVA_OPTS below.
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION:-8.15.0}
+    container_name: orion-elasticsearch
+    environment:
+      - discovery.type=single-node     # local: run alone, no cluster discovery
+      - xpack.security.enabled=false   # local dev: no TLS / no auth (8.x default is on)
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g     # fixed heap, keeps RAM usage in check on a dev box
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"\\(green\\|yellow\\)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - elk
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:${ELK_VERSION:-8.15.0}
+    container_name: orion-logstash
+    environment:
+      # Disable Logstash's internal monitoring pipeline (on by default in 8.x):
+      # we don't collect Logstash telemetry, so it's one less pipeline to run.
+      - XPACK_MONITORING_ENABLED=false
+      - LS_JAVA_OPTS=-Xms512m -Xmx512m   # bounded heap (dev RAM budget)
+    volumes:
+      - ./elk/logstash/pipeline:/usr/share/logstash/pipeline:ro
+    ports:
+      - "5044:5044"   # Beats input
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elk
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELK_VERSION:-8.15.0}
+    container_name: orion-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elk
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${ELK_VERSION:-8.15.0}
+    container_name: orion-filebeat
+    # root: required to read the Docker json-file logs and the docker socket.
+    user: root
+    # --strict.perms=false: the bind-mounted config is owned by the host user,
+    # which would otherwise trip Filebeat's "config file must be owned by root"
+    # ownership check.
+    command: ["--strict.perms=false"]
+    volumes:
+      - ./elk/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat-data:/usr/share/filebeat/data   # persists the read offsets (registry)
+    depends_on:
+      - logstash
+    networks:
+      - elk
+
+volumes:
+  es-data:
+  filebeat-data:
+
+networks:
+  elk:
+    driver: bridge

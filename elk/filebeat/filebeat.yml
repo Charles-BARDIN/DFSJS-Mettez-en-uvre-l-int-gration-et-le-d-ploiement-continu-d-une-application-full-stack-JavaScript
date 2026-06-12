@@ -1,0 +1,28 @@
+# Filebeat reads the Docker json-file logs of every container on the host, then
+# keeps only the Orion application containers (label logging=orion) and ships
+# their lines to Logstash. The `container` input automatically unwraps the
+# Docker json-file envelope, so [message] holds the raw application log line
+# (JSON for both tiers: Winston for the backend, JSON access_log for Nginx).
+filebeat.inputs:
+  - type: container
+    paths:
+      - /var/lib/docker/containers/*/*.log
+
+processors:
+  # Attach container.name / container.image / container.labels.* from the
+  # Docker API (read-only socket); needed so the next processor can filter on
+  # the logging=orion label.
+  - add_docker_metadata: ~
+  # Ingest only the Orion app containers; drop ELK's own logs and anything else.
+  - drop_event:
+      when:
+        not:
+          equals:
+            container.labels.logging: "orion"
+
+# Parsing/enrichment is delegated to Logstash (single place to evolve the
+# pipeline), so Filebeat only forwards.
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.level: info
